@@ -171,7 +171,8 @@ scene.add(fillLight);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
-controls.minDistance   = 5;
+controls.zoomSpeed     = 3.0;
+controls.minDistance   = 5; // updated after model loads
 controls.maxDistance   = 3000; // updated after model loads
 controls.maxPolarAngle = Math.PI / 2.05;
 
@@ -236,6 +237,7 @@ function loadGLB(url) {
       const maxDim = Math.max(size.x, size.y, size.z);
 
       controls.maxDistance = maxDim * 100;
+      controls.minDistance = maxDim * 0.005;
       camera.far = maxDim * 200;
       camera.updateProjectionMatrix();
 
