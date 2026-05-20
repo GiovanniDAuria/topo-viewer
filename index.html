@@ -145,7 +145,6 @@ document.body.appendChild(renderer.domElement);
 // ── Scene & Camera ───────────────────────────────────────────────────────────
 const scene  = new THREE.Scene();
 scene.background = new THREE.Color(0x1a1a2e);
-scene.fog = new THREE.Fog(0x1a1a2e, 500, 2000);
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 5000);
 camera.position.set(0, 200, 400);
@@ -173,7 +172,7 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.minDistance   = 5;
-controls.maxDistance   = 3000;
+controls.maxDistance   = 3000; // updated after model loads
 controls.maxPolarAngle = Math.PI / 2.05;
 
 // ── Path highlight colours (Day 1 / 2 / 3) ──────────────────────────────────
@@ -235,6 +234,10 @@ function loadGLB(url) {
       const center = box.getCenter(new THREE.Vector3());
       const size   = box.getSize(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z);
+
+      controls.maxDistance = maxDim * 8;
+      camera.far = maxDim * 20;
+      camera.updateProjectionMatrix();
 
       controls.target.copy(center);
       camera.position.set(
