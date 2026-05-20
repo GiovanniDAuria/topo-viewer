@@ -235,8 +235,8 @@ function loadGLB(url) {
       const size   = box.getSize(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z);
 
-      controls.maxDistance = maxDim * 8;
-      camera.far = maxDim * 20;
+      controls.maxDistance = maxDim * 100;
+      camera.far = maxDim * 200;
       camera.updateProjectionMatrix();
 
       controls.target.copy(center);
