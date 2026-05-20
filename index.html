@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Topo Path Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a2e; overflow: hidden; font-family: sans-serif; }
+    canvas { display: block; }
+
+    #ui {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      color: #e0e0e0;
+      pointer-events: none;
+    }
+    #ui h1 { font-size: 1.1rem; font-weight: 600; margin-bottom: 4px; }
+    #ui p  { font-size: 0.75rem; opacity: 0.6; }
+
+    #legend {
+      position: absolute;
+      bottom: 24px;
+      left: 16px;
+      background: rgba(0,0,0,0.45);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: #e0e0e0;
+      font-size: 0.78rem;
+    }
+    #legend .leg { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+    #legend .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+    #controls {
+      position: absolute;
+      bottom: 24px;
+      right: 16px;
+      background: rgba(0,0,0,0.45);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: #aaa;
+      font-size: 0.72rem;
+      line-height: 1.8;
+    }
+
+    #drop-zone {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #e0e0e0;
+      gap: 12px;
+    }
+    #drop-zone.hidden { display: none; }
+    #drop-zone .box {
+      border: 2px dashed rgba(255,255,255,0.3);
+      border-radius: 16px;
+      padding: 48px 64px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    #drop-zone .box:hover { border-color: rgba(255,255,255,0.7); }
+    #drop-zone .box h2 { font-size: 1.3rem; margin-bottom: 8px; }
+    #drop-zone .box p  { font-size: 0.85rem; opacity: 0.55; }
+    #file-input { display: none; }
+
+    #loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #e0e0e0;
+      font-size: 1rem;
+      background: rgba(26,26,46,0.85);
+    }
+    #loading.hidden { display: none; }
+  </style>
+</head>
+<body>
+
+<!-- Drop / open UI (hidden by default — model loads automatically) -->
+<div id="drop-zone" class="hidden">
+  <div class="box" onclick="document.getElementById('file-input').click()">
+    <h2>Drop your GLB file here</h2>
+    <p>Or click to open a file</p>
+  </div>
+</div>
+<input type="file" id="file-input" accept=".glb,.gltf" />
+
+<!-- Loading indicator -->
+<div id="loading">Loading model…</div>
+
+<!-- Overlay UI (shown after load) -->
+<div id="ui" style="display:none">
+  <h1>Topo Path Viewer</h1>
+  <p>Drag to orbit · Scroll to zoom · Right-drag to pan</p>
+</div>
+
+<div id="legend" style="display:none">
+  <div class="leg"><div class="dot" style="background:#ff6b35"></div> Day 1</div>
+  <div class="leg"><div class="dot" style="background:#f7c59f"></div> Day 2</div>
+  <div class="leg"><div class="dot" style="background:#efefd0"></div> Day 3</div>
+</div>
+
+<div id="controls" style="display:none">
+  Left-drag — orbit<br>
+  Right-drag — pan<br>
+  Scroll — zoom<br>
+  R — reset camera
+</div>
+
+<!-- Three.js via CDN -->
+<script type="importmap">
+{
+  "imports": {
+    "three":              "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/":      "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+
+// ── Model URL — replace with your public cloud storage URL ──────────────────
+const MODEL_URL = 'https://YOUR-BUCKET-URL/your-topo.glb';
+
+// ── Renderer ────────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+document.body.appendChild(renderer.domElement);
+
+// ── Scene & Camera ───────────────────────────────────────────────────────────
+const scene  = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a2e);
+scene.fog = new THREE.Fog(0x1a1a2e, 500, 2000);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 5000);
+camera.position.set(0, 200, 400);
+
+// ── Lights ───────────────────────────────────────────────────────────────────
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambientLight);
+
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.8);
+sun.position.set(200, 400, 100);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far  = 2000;
+sun.shadow.camera.left = sun.shadow.camera.bottom = -800;
+sun.shadow.camera.right = sun.shadow.camera.top  =  800;
+scene.add(sun);
+
+const fillLight = new THREE.DirectionalLight(0xaaccff, 0.4);
+fillLight.position.set(-100, 100, -200);
+scene.add(fillLight);
+
+// ── Controls ─────────────────────────────────────────────────────────────────
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance   = 5;
+controls.maxDistance   = 3000;
+controls.maxPolarAngle = Math.PI / 2.05;
+
+// ── Path highlight colours (Day 1 / 2 / 3) ──────────────────────────────────
+// These colours are applied to objects whose Blender name contains "day1","day2","day3"
+// (case-insensitive). Rename your Blender objects accordingly, or just enjoy
+// the colours your Blender materials already bring in.
+const PATH_COLOURS = {
+  day1: 0xff6b35,
+  day2: 0xf7c59f,
+  day3: 0xefefd0,
+};
+
+function applyPathColours(root) {
+  root.traverse(obj => {
+    const name = (obj.name || '').toLowerCase();
+    for (const [key, colour] of Object.entries(PATH_COLOURS)) {
+      if (name.includes(key)) {
+        if (obj.isMesh) {
+          obj.material = new THREE.MeshStandardMaterial({
+            color: colour,
+            emissive: colour,
+            emissiveIntensity: 0.3,
+            roughness: 0.4,
+            metalness: 0.0,
+          });
+        }
+      }
+    }
+  });
+}
+
+// ── Load GLB ─────────────────────────────────────────────────────────────────
+let loadedModel = null;
+
+function loadGLB(url) {
+  document.getElementById('loading').classList.remove('hidden');
+  const loader = new GLTFLoader();
+  loader.load(
+    url,
+    gltf => {
+      if (loadedModel) scene.remove(loadedModel);
+
+      const model = gltf.scene;
+      loadedModel = model;
+
+      // Enable shadows on everything
+      model.traverse(obj => {
+        if (obj.isMesh) {
+          obj.castShadow    = true;
+          obj.receiveShadow = true;
+        }
+      });
+
+      applyPathColours(model);
+      scene.add(model);
+
+      // Fit camera to model
+      const box    = new THREE.Box3().setFromObject(model);
+      const center = box.getCenter(new THREE.Vector3());
+      const size   = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+
+      controls.target.copy(center);
+      camera.position.set(
+        center.x,
+        center.y + maxDim * 0.6,
+        center.z + maxDim * 1.0
+      );
+      controls.update();
+
+      // Adjust shadow camera to fit terrain
+      sun.shadow.camera.left   = -maxDim;
+      sun.shadow.camera.right  =  maxDim;
+      sun.shadow.camera.top    =  maxDim;
+      sun.shadow.camera.bottom = -maxDim;
+      sun.shadow.camera.far    = maxDim * 4;
+      sun.shadow.camera.updateProjectionMatrix();
+
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('drop-zone').classList.add('hidden');
+      document.getElementById('ui').style.display = '';
+      document.getElementById('legend').style.display = '';
+      document.getElementById('controls').style.display = '';
+
+      if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+    },
+    xhr => {
+      if (xhr.total) {
+        const pct = Math.round(xhr.loaded / xhr.total * 100);
+        document.getElementById('loading').textContent = `Loading model… ${pct}%`;
+      }
+    },
+    err => {
+      document.getElementById('loading').textContent = `Error loading file: ${err.message}`;
+      console.error(err);
+    }
+  );
+}
+
+// ── File input / drag-drop ────────────────────────────────────────────────────
+document.getElementById('file-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) loadGLB(URL.createObjectURL(file));
+});
+
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); });
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file && (file.name.endsWith('.glb') || file.name.endsWith('.gltf'))) {
+    loadGLB(URL.createObjectURL(file));
+  }
+});
+
+// ── Reset camera on R key ────────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  if (e.key === 'r' || e.key === 'R') {
+    if (loadedModel) {
+      const box    = new THREE.Box3().setFromObject(loadedModel);
+      const center = box.getCenter(new THREE.Vector3());
+      const size   = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      controls.target.copy(center);
+      camera.position.set(center.x, center.y + maxDim * 0.6, center.z + maxDim * 1.0);
+      controls.update();
+    }
+  }
+});
+
+// ── Resize ───────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ── Auto-load model on page start ───────────────────────────────────────────
+loadGLB(MODEL_URL);
+
+// ── Render loop ───────────────────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
